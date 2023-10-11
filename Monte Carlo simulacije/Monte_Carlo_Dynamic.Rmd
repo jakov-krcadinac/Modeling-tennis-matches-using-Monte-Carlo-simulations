@@ -1,0 +1,334 @@
+---
+title: "Dinamički Monte Carlo"
+author: "Lovre Jerković i Jure Zloić"
+date: "2023-01-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(magrittr)
+library(dplyr)
+set.seed(1234)
+```
+
+```{r}
+vjerojatnosti <- read.csv("p_vjerojatnosti_igraca.csv")
+vj_break <- read.csv("break_vjerojatnosti.csv")
+```
+
+
+```{r}
+
+length(pobjednici$SportEventID)
+
+```
+
+
+
+
+
+
+```{r}
+v <- character(0)
+x <- numeric(0)
+players <- vjerojatnosti$Player
+#za svaki meč pokreće se 400 simulacija, uzimaju se u obzir vjerojatnosti svakog igrača da osvoji poen kad servira, i to u različitim situacijama, npr. kad je umoran, kad breaka protivnika ili kad ga protivnik breaka
+
+for(i in 1:length(pobjednici$SportEventID)) {
+  player1 <- prvi_igraci[i]
+  player2 <- drugi_igraci[i]
+  if(!(player1 %in% players) | !(player2 %in% players)) {
+    print("Ne postoji p vjerojatnost igrača")
+    v <- c(v, "X")
+    x <- c(x, NA)
+    next
+  }
+  if(vjerojatnosti$DUGI_DIO_MECA_p[vjerojatnosti$Player == player1] == 0 |
+     vjerojatnosti$DUGI_DIO_MECA_p[vjerojatnosti$Player == player2] == 0) {
+    print("Ne postoji DUGI_DIO_MECA_p za oba igrača")
+    v <- c(v, "X")
+    x <- c(x, NA)
+    next
+  }
+  p1 <- vjerojatnosti$PRVA_2_SETA_p[vjerojatnosti$Player == player1]
+  p1_umoran <- vjerojatnosti$DUGI_DIO_MECA_p[vjerojatnosti$Player == player1]
+  p1_win <- vj_break$Win[vj_break$Player == player1]
+  p1_lose <- vj_break$Lose[vj_break$Player == player1]
+  p2 <- vjerojatnosti$PRVA_2_SETA_p[vjerojatnosti$Player == player2]
+  p2_umoran <- vjerojatnosti$DUGI_DIO_MECA_p[vjerojatnosti$Player == player2]
+  p2_win <- vj_break$Win[vj_break$Player == player2]
+  p2_lose <- vj_break$Lose[vj_break$Player == player2]
+  sets <- pobjednici$na_koliko_setova_se_igra_mec
+  j <- 1
+  pobijedio_prvi <- 0
+  while(j<=400){
+    montecarlo(p1, p1_umoran, p1_win, p1_lose, p2, p2_umoran, p2_win, p2_lose, sets[i])
+    j <- j + 1
+  }
+  if(pobijedio_prvi/400 > 0.5) {
+    v <- c(v, player1)
+    x <- c(x, pobijedio_prvi/400)
+  } else {
+    v <- c(v, player2)
+    x <- c(x, (400-pobijedio_prvi)/400)
+  }
+}
+
+
+```
+
+
+
+```{r}
+
+#prepravit nakon tiebreaka, koji prvi servira u tiebreaku, u iducem setu returna
+#probat napravit da set["Home"] bude npr set[Djokovic]
+#mozda napravit matricu da pamti svaki set kolko je zavrsio
+#kako vjerojatnosti nakon breakanja promjenit
+
+sets <- c(0,0)
+names(sets) <- c("Home", "Away")
+
+gems <- c(0,0)
+names(gems) <- c("Home", "Away")
+
+points <- c(0,0)
+names(points) <- c("Home", "Away")
+
+montecarlo <- function(p1, p1_umoran, p1_win, p1_lose, p2, p2_umoran, p2_win, p2_lose, sets_cnt){ 
+  
+n <- 1
+
+p1_obicni <- p1
+p2_obicni <- p2
+
+sets["Home"] <- 0
+sets["Away"] <- 0
+
+  break_p <- 0
+  dm <- 0
+  
+  if(sets_cnt == 5) {
+    sets_cnt <- 3
+  } else {
+    sets_cnt <- 2
+  }
+
+  while (sets["Home"]<sets_cnt & sets["Away"]<sets_cnt) {
+    
+    gems["Home"] <- 0
+    gems["Away"] <- 0
+    
+    #primjena umora nakon 3.seta
+    if(sets["Home"]+sets["Away"] > 2){
+      p1 <- p1_umoran
+      p2 <- p2_umoran
+      dm <- 1
+    }
+    
+    while(gems["Home"]<6 & gems["Away"]<6){
+      
+      #gameovi dok jedan ne dode do 6
+      points["Home"] <- 0
+      points["Away"] <- 0
+        
+      while((abs(points["Home"]-points["Away"]))<2 | (points["Home"]<4 & points["Away"]<4)){
+        
+        if(n == 1){
+          if(sample(1:2, 1,prob = c(p1,1-p1))==1){ 
+            points["Home"] <- points["Home"] + 1
+          }else{
+            points["Away"] <- points["Away"] + 1
+          }
+        }else{
+          if(sample(1:2, 1,prob = c(p2,1-p2))==2){ 
+            points["Home"] <- points["Home"] + 1
+          }else{
+            points["Away"] <- points["Away"] + 1
+          }
+        }
+      }
+      
+      if(points["Home"] > points["Away"]){
+        gems["Home"] <- gems["Home"]+1
+      }else{
+        gems["Away"] <- gems["Away"]+1
+      }
+      
+      if(n == 1 && points["Away"] > points["Home"] && break_p == 0 && dm == 0) {
+        p1 <- p1_lose
+        p2 <- p2_win
+        break_p <- 2
+      } else if(n == 2 && points["Home"] > points["Away"] && break_p == 0 && dm == 0) {
+        p1 <- p1_win
+        p2 <- p2_lose
+        break_p <- 1
+      } else if(n == 1 && points["Away"] > points["Home"] && break_p == 1 && dm == 0) {
+        p1 <- p1_obicni
+        p2 <- p2_obicni
+      } else if(n == 2 && points["Home"] > points["Away"] && break_p == 2 && dm == 0) {
+        p1 <- p1_obicni
+        p2 <- p2_obicni
+      } else if(n == 1 && points["Away"] > points["Home"] && break_p == 1 && dm == 1) {
+        p1 <- p1_umoran
+        p2 <- p2_umoran
+      } else if(n == 2 && points["Home"] > points["Away"] && break_p == 2 && dm == 1) {
+        p1 <- p1_umoran
+        p2 <- p2_umoran
+      } else if(n == 1 && points["Away"] > points["Home"] && break_p == 0 && dm == 1) {
+        p1 <- mean(p1_lose, p1_umoran)
+        p2 <- mean(p2_win, p2_umoran)
+      } else if(n == 2 && points["Home"] > points["Away"] && break_p == 0 && dm == 1) {
+        p1 <- mean(p1_win, p1_umoran)
+        p2 <- mean(p2_lose, p2_umoran)
+      }
+      
+      if(n==1){
+        n <- 2
+      }else{
+        n <- 1
+      }
+      
+    }
+    
+    #ako je razlika 1, igraj do pobjede, inace gotovo
+    
+    if((abs(gems["Home"]-gems["Away"])) == 1){
+      
+      #jos jedan game
+     
+      points["Home"] <- 0
+      points["Away"] <- 0
+      
+      while((abs(points["Home"]-points["Away"]))<2 | (points["Home"]<4 & points["Away"]<4)){
+        if(n == 1){
+          if(sample(1:2, 1,prob = c(p1,1-p1))==1){
+            points["Home"] <- points["Home"] + 1
+          }else{
+            points["Away"] <- points["Away"] + 1
+          }
+        }else{
+          if(sample(1:2, 1,prob = c(p2,1-p2))==2){ 
+            points["Home"] <- points["Home"] + 1
+          }else{
+            points["Away"] <- points["Away"] + 1
+          }    
+        }
+      }
+      
+      if(points["Home"] > points["Away"]){
+        gems["Home"] <- gems["Home"]+1
+      }else{
+        gems["Away"] <- gems["Away"]+1
+      }
+      if(n==1){
+        n <- 2
+      }else{
+        n <- 1
+      }    
+      
+      if((abs(gems["Home"]-gems["Away"])) == 0){
+        #tiebreak
+        points["Home"] <- 0
+        points["Away"] <- 0
+        first_serve <- 0
+        
+        while((abs(points["Home"]-points["Away"]))<2 | (points["Home"]<7 & points["Away"]<7)){
+          if(first_serve==0){
+            
+            first_serve <- 1
+            
+            if(n == 1){
+              if(sample(1:2, 1,prob = c(p1,1-p1))==1){
+                points["Home"] <- points["Home"] + 1
+              }else{
+                points["Away"] <- points["Away"] + 1
+              }            
+            }else{
+              if(sample(1:2, 1,prob = c(p2,1-p2))==2){
+                points["Home"] <- points["Home"] + 1
+              }else{
+                points["Away"] <- points["Away"] + 1
+              }
+            }
+            
+            if(n==1){
+              n <- 2
+            }else{
+              n <- 1
+            }
+          
+          }else{
+            cnt <- 0
+            while(cnt<2 | (abs(points["Home"]-points["Away"]))<2 | (points["Home"]<7 & points["Away"]<7)){ 
+              if(n == 1){
+                if(sample(1:2, 1,prob = c(p1,1-p1))==1){
+                  points["Home"] <- points["Home"] + 1
+                }else{
+                  points["Away"] <- points["Away"] + 1
+                }
+              }else{
+                if(sample(1:2, 1,prob = c(p2,1-p2))==2){
+                  points["Home"] <- points["Home"] + 1
+                }else{
+                  points["Away"] <- points["Away"] + 1
+                }
+              }
+            
+              cnt <- cnt+1
+            }
+            if(n==1){
+              n <- 2
+            }else{
+              n <- 1
+            }
+          }
+        }
+        if(points["Home"] > points["Away"]){ 
+          gems["Home"] <- gems["Home"]+1
+        }else{
+          gems["Away"] <- gems["Away"]+1
+        }
+      }
+    }
+    if(gems["Home"]>gems["Away"]){
+      sets["Home"] <- sets["Home"]+1
+    }else{
+      sets["Away"] <- sets["Away"]+1
+    }
+  }
+  if(sets["Home"] > sets["Away"]){
+    pobijedio_prvi <<- pobijedio_prvi+1
+  }
+}
+```
+
+```{r}
+pobijedio_prvi <- 0
+brojac <- 0
+```
+
+```{r}
+length(v)
+length(x)
+
+s <- sum(v == pobjednici$Pobjednik)
+s
+
+
+
+```
+
+```{r}
+
+pobjednici$Dinamicki_Monte_Carlo_pobjednik <- v
+pobjednici$Dinamicki_Monte_Carlo_pobjednik_p <- x
+
+write.csv(pobjednici, "pobjednici.csv")
+
+```
+
